@@ -14,6 +14,7 @@ export class webgpu {
     private vertices: Float32Array | undefined
     private buffer: GPUBuffer | undefined
 
+    private gridSize = 64
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
     }
@@ -65,12 +66,31 @@ export class webgpu {
             buffers: vertexBufferLayout
             },
             fragment: {
-            module: this.shader,
-            entryPoint: "fragmentMain",
-            targets: [{
-                format: this.canvasFormat
-            }]
+                module: this.shader,
+                entryPoint: "fragmentMain",
+                targets: [{
+                    format: this.canvasFormat
+                }]
             }
+        });
+
+        // Create a uniform buffer that describes the grid.
+        const uniformArray = new Float32Array([this.gridSize, this.gridSize]);
+        const uniformBuffer = this.device.createBuffer({
+            label: "Grid Uniforms",
+            size: uniformArray.byteLength,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+        this.device.queue.writeBuffer(uniformBuffer, 0, uniformArray);
+
+        // Create a bind group to pass the grid uniforms into the pipeline
+        const bindGroup = this.device.createBindGroup({
+            label: "Cell bind group",
+            layout: this.pipeline.getBindGroupLayout(0),
+            entries: [{
+            binding: 0,
+            resource: { buffer: uniformBuffer }
+            }],
         });
 
         // Clear the canvas with a render pass
@@ -90,11 +110,13 @@ export class webgpu {
             }]
         });
 
-
         // Draw the square.
         pass.setPipeline(this.pipeline);
+        pass.setBindGroup(0, bindGroup);
         pass.setVertexBuffer(0, this.buffer);
-        pass.draw(this.vertices.length / 2);
+
+        const instanceCount = this.gridSize * this.gridSize;
+        pass.draw(this.vertices.length / 2, instanceCount);
 
         pass.end();
 
