@@ -2,7 +2,7 @@ import './style.css'
 import { webgpu } from './webgpu.ts'
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-  <canvas id="canvasElement" width="512" height="512"></canvas>
+  <canvas id="canvasElement" width="1024" height="1024"></canvas>
 `
 
 const canvas = document.getElementById("canvasElement") as HTMLCanvasElement | null;

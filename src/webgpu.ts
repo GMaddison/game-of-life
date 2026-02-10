@@ -14,7 +14,7 @@ export class webgpu {
     private vertices: Float32Array | undefined
     private buffer: GPUBuffer | undefined
 
-    private gridSize = 64
+    private gridSize = 128
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
     }
