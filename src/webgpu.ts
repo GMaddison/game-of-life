@@ -16,20 +16,19 @@ export class webgpu {
     private context!: GPUCanvasContext
     private canvasFormat!: GPUTextureFormat
 
-    private pipeline!: GPURenderPipeline
     
-    private verticeLength!: number;
 
     private buffer: GPUBuffer | undefined
-
-    private step: number;
-    private timeStep: number;
-
-    private gridSize = 100
-    private workgroupSize;
-
     private simulationPipeline!: GPUComputePipeline;
     private bindGroups!: GPUBindGroup[];
+    private pipeline!: GPURenderPipeline
+
+    private verticeLength!: number;
+    
+    private step: number;
+    private gridSize = 100
+    private workgroupSize;
+    private timeStep: number;
 
     constructor(canvas: HTMLCanvasElement, 
                 //width: number, TODO: canvas width
