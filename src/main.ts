@@ -1,3 +1,4 @@
+import './base.css'
 import './style.css'
 import { webgpu } from './webgpu.ts'
 
