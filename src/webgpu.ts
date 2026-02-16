@@ -294,9 +294,6 @@ export class webgpu {
 
         // Finish the command buffer and immediately submit it.
         this.device.queue.submit([encoder.finish()])
-
     }
-
-
 }
 
