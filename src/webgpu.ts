@@ -1,7 +1,13 @@
-import cellShader from './shaders/cell.wgsl?raw'
-import cellComputeShader from './shaders/cell-compute.wgsl?raw';
+import vertShader from './shaders/vert.wgsl?raw'
+import fragShader from './shaders/frag.wgsl?raw'
+import computeShader from './shaders/compute.wgsl?raw';
 
-const UPDATE_INTERVAL = 200; // ms
+const VertexSize = {
+    Gap: 0,
+    Full: 1,
+} as const;
+
+type VertexSize = typeof VertexSize[keyof typeof VertexSize];
 
 export class webgpu {
     private canvas: HTMLCanvasElement;
@@ -10,66 +16,115 @@ export class webgpu {
     private context!: GPUCanvasContext
     private canvasFormat!: GPUTextureFormat
 
-    private shader!: GPUShaderModule
     private pipeline!: GPURenderPipeline
     
-    private vertices!: Float32Array | undefined
+    private verticeLength!: number;
+
     private buffer: GPUBuffer | undefined
 
     private step: number;
+    private timeStep: number;
 
-    private gridSize = 16
-    private workgroupSize = 8;
+    private gridSize = 100
+    private workgroupSize;
 
     private simulationPipeline!: GPUComputePipeline;
     private bindGroups!: GPUBindGroup[];
 
-    constructor(canvas: HTMLCanvasElement) {
+    constructor(canvas: HTMLCanvasElement, 
+                //width: number, TODO: canvas width
+                //height: number, TODO: canvas height
+                timestep: number, 
+                workgroupSize: number) {
         this.canvas = canvas;
+        this.timeStep = timestep;
+        this.workgroupSize = workgroupSize;
         this.step = 0;
     }
 
     public async init() {
-        await this.initDevice()
-        this.initCanvas()
+        await this.initDevice();
+        this.initCanvas();
+        this.initVertexStage();
+        this.initPipelineStage();
+        setInterval(() => this.update(), this.timeStep);
+    }
 
-        // VERTEX Stage
-        this.vertices = new Float32Array([
-            // X,    Y,
-            // -1.0, -1.0, // Triangle 1 (Blue)
-            // 1.0, -1.0,
-            // 1.0,  1.0,
+    public async initDevice() {
+        if (!navigator.gpu) {
+            throw new Error("WebGPU not supported on this browser.");
+        }
 
-            // -1.0, -1.0, // Triangle 2 (Red)
-            // 1.0,  1.0,
-            // -1.0,  1.0,
-            -0.8, -0.8, // Triangle 1 (Blue)
-            0.8, -0.8,
-            0.8,  0.8,
+        const adapter = await navigator.gpu?.requestAdapter() as GPUAdapter | null;
+        if (adapter === null) {
+            throw new Error("No appropriate GPUAdapter found.");
+        }
 
-            -0.8, -0.8, // Triangle 2 (Red)
-            0.8,  0.8,
-            -0.8,  0.8,
-        ]);
+        const device = await adapter.requestDevice() as GPUDevice | null;
+        if (device === null) {
+            throw new Error("Could not find device");
+        }
+
+        this.device = device
+    }
+
+    public initCanvas() {
+        const context = this.canvas.getContext("webgpu") as GPUCanvasContext | null;
+        if (context === null) {
+            throw new Error("Could not find context element");
+        }
+
+        this.context = context
+
+        const canvasFormat = navigator.gpu.getPreferredCanvasFormat() as GPUTextureFormat;
+        context.configure({
+            device: this.device,
+            format: canvasFormat,
+        });
+
+        this.canvasFormat = canvasFormat
+    }
+
+    public getInstanceMesh(size: VertexSize): Float32Array {
+        switch(size) {
+            case VertexSize.Gap:
+                return new Float32Array([
+                -0.8, -0.8,
+                0.8, -0.8,
+                0.8,  0.8,
+
+                -0.8, -0.8,
+                0.8,  0.8,
+                -0.8,  0.8,
+                ]);
+            case VertexSize.Full:
+                return new Float32Array([
+                -1.0, -1.0,
+                1.0, -1.0,
+                1.0,  1.0,
+
+                -1.0, -1.0,
+                1.0,  1.0,
+                -1.0,  1.0,
+                ]);
+        }
+    }
+
+    public initVertexStage() {
+        const vertices = this.getInstanceMesh(VertexSize.Full);
 
         this.buffer = this.device.createBuffer({
             label: "Cell vertices",
-            size: this.vertices.byteLength,
+            size: vertices.byteLength,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         })
+
+        this.verticeLength = vertices.length;
         
-        this.device.queue.writeBuffer(this.buffer, 0, this.vertices);
+        this.device.queue.writeBuffer(this.buffer, 0, vertices);
+    }
 
-        const vertexBufferLayout: GPUVertexBufferLayout = 
-        {
-            arrayStride: 8,
-            attributes: [{
-                format: "float32x2",
-                offset: 0,
-                shaderLocation: 0, // @location(0) in @vertex shader.
-            }],
-        };
-
+    public initPipelineStage() {
         const bindGroupLayout = this.device.createBindGroupLayout({
             label: "Cell Bind Group Layout",
             entries: [{
@@ -92,21 +147,36 @@ export class webgpu {
             bindGroupLayouts: [ bindGroupLayout ],
         });
 
-        this.shader = this.device.createShaderModule({
-            label: "Cell shader",
-            code: cellShader,
+        const vertexShader = this.device.createShaderModule({
+            label: "Vertex Shader",
+            code: vertShader,
         });
+
+        const fragmentShader = this.device.createShaderModule({
+            label: "Fragment Shader",
+            code: fragShader,
+        });
+
+        const vertexBufferLayout: GPUVertexBufferLayout = 
+        {
+            arrayStride: 8,
+            attributes: [{
+                format: "float32x2",
+                offset: 0,
+                shaderLocation: 0, // @location(0) in @vertex shader.
+            }],
+        };
 
         this.pipeline = this.device.createRenderPipeline({
             label: "Cell pipeline",
             layout: pipelineLayout,
             vertex: {
-                module: this.shader,
+                module: vertexShader,
                 entryPoint: "vertexMain",
                 buffers: [vertexBufferLayout],
             },
             fragment: {
-                module: this.shader,
+                module: fragmentShader,
                 entryPoint: "fragmentMain",
                 targets: [{
                     format: this.canvasFormat
@@ -114,8 +184,7 @@ export class webgpu {
             }
         });
 
-        // TODO
-        const computeshader = cellComputeShader.replace(/WORKGROUP_SIZE/g, String(this.workgroupSize));
+        const computeshader = computeShader.replace(/WORKGROUP_SIZE/g, String(this.workgroupSize));
         const simulationShaderModule = this.device.createShaderModule({
             label: "Life simulation shader",
             code: computeshader
@@ -142,36 +211,23 @@ export class webgpu {
         // grid state
         const cellStateArray = new Uint32Array(this.gridSize * this.gridSize);
         const cellStateStorage = [
-        this.device.createBuffer({
-            label: "Cell State A",
-            size: cellStateArray.byteLength,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        }),
-        this.device.createBuffer({
-            label: "Cell State B",
-            size: cellStateArray.byteLength,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-        }),
+            this.device.createBuffer({
+                label: "Cell State A",
+                size: cellStateArray.byteLength,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            }),
+            this.device.createBuffer({
+                label: "Cell State B",
+                size: cellStateArray.byteLength,
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+            }),
         ]
-
-        // mark every third cell, first grid as active
-        // for (let i = 0; i < cellStateArray.length; i += 3) {
-        //         cellStateArray[i] = 1;
-        // }
 
         for (let i = 0; i < cellStateArray.length; ++i) {
             cellStateArray[i] = Math.random() > 0.6 ? 1 : 0;
         }
 
-
         this.device.queue.writeBuffer(cellStateStorage[0], 0, cellStateArray);
-
-        // mark every other cell, second grid as active
-        for (let i = 0; i < cellStateArray.length; i++) {
-                cellStateArray[i] = i % 2;
-        }
-
-        this.device.queue.writeBuffer(cellStateStorage[1], 0, cellStateArray);
 
         // bind group to pass the grid uniforms into the pipeline
         this.bindGroups = [
@@ -210,47 +266,6 @@ export class webgpu {
             }],
         }),
         ];
-
-        setInterval(() => this.update(), UPDATE_INTERVAL);
-    }
-
-    public fragmentShaderStage() {
-
-    }
-
-    public async initDevice() {
-        if (!navigator.gpu) {
-            throw new Error("WebGPU not supported on this browser.");
-        }
-
-        const adapter = await navigator.gpu?.requestAdapter() as GPUAdapter | null;
-        if (adapter === null) {
-            throw new Error("No appropriate GPUAdapter found.");
-        }
-
-        const device = await adapter.requestDevice() as GPUDevice | null;
-        if (device === null) {
-            throw new Error("Could not find device");
-        }
-
-        this.device = device
-    }
-
-    public initCanvas() {
-        const context = this.canvas.getContext("webgpu") as GPUCanvasContext | null;
-        if (context === null) {
-            throw new Error("Could not find context element");
-        }
-
-        this.context = context
-
-        const canvasFormat = navigator.gpu.getPreferredCanvasFormat() as GPUTextureFormat;
-        context.configure({
-            device: this.device,
-            format: canvasFormat,
-        });
-
-        this.canvasFormat = canvasFormat
     }
 
     public update() {
@@ -288,7 +303,7 @@ export class webgpu {
         pass.setVertexBuffer(0, this.buffer);
 
         const instanceCount = this.gridSize * this.gridSize;
-        pass.draw(this.vertices!.length / 2, instanceCount);
+        pass.draw(this.verticeLength / 2, instanceCount);
 
         pass.end();
 

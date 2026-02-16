@@ -11,5 +11,5 @@ if (canvas === null) {
     throw new Error("Could not find canvas element");
 }
 
-const gpu = new webgpu(canvas)
+const gpu = new webgpu(canvas, 100, 8)
 await gpu.init()
